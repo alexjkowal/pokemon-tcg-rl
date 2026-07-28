@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# Conda and virtual environments
+.conda/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing and linting
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Training outputs
+runs/
+logs/
+checkpoints/
+models/*
+!models/.gitkeep
+
+# Model files
+*.pt
+*.pth
+*.ckpt
+
+# TensorBoard
+events.out.tfevents.*
+
+# Generated data
+data/generated/
+*.parquet
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Windows
+Thumbs.db
+desktop.ini
