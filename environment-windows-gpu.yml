@@ -1,0 +1,57 @@
+name: pokemon-tcg-rl
+
+channels:
+  - conda-forge
+
+dependencies:
+  # Python 3.11 has broad support across PyTorch and RL libraries.
+  - python=3.11
+  - pip>=24
+  - git
+
+  # Core numerical and game-engine tooling
+  - numpy<3
+  - scipy
+  - pandas
+  - pyyaml
+  - pydantic>=2
+  - orjson
+  - networkx
+  - rich
+  - tqdm
+  - psutil
+
+  # Development, testing, and analysis
+  - matplotlib
+  - jupyterlab
+  - ipykernel
+  - pytest
+  - pytest-cov
+  - hypothesis
+  - ruff
+  - mypy
+
+  - pip:
+      # PyTorch 2.13 with the CUDA 12.6 runtime.
+      # This forces the GPU-enabled Windows wheel rather than a CPU build.
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - torch==2.13.0+cu126
+
+      # Reinforcement-learning environment interfaces
+      - gymnasium
+      - pettingzoo
+      - supersuit
+
+      # Initial model-free training stack with invalid-action masking
+      - stable-baselines3==2.9.0
+      - sb3-contrib==2.9.0
+
+      # Experiment configuration and monitoring
+      - hydra-core>=1.3,<2
+      - tensorboard
+
+      # Optional later for larger-scale multi-agent self-play on Windows.
+      # Ray/RLlib Windows support is currently beta, so it is intentionally
+      # not installed during the initial environment creation.
+      # Install later with:
+      # python -m pip install "ray[rllib]==2.56.0"
