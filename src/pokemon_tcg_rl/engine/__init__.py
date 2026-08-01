@@ -5,7 +5,9 @@ from pokemon_tcg_rl.engine.state import (
     Card,
     CardType,
     PlayerState,
+    PokemonRule,
     PokemonStage,
+    TrainerCardType,
 )
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "CardType",
     "Game",
     "PlayerState",
+    "PokemonRule",
     "PokemonStage",
+    "TrainerCardType",
 ]

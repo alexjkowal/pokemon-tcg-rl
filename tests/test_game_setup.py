@@ -8,6 +8,7 @@ from pokemon_tcg_rl.engine.state import (
     CardType,
     PlayerState,
     PokemonStage,
+    TrainerCardType,
 )
 
 
@@ -31,32 +32,39 @@ def make_trainer_deck(prefix: str) -> list[Card]:
             card_id=f"{prefix}-{index}",
             name=f"Test Trainer {index}",
             card_type=CardType.TRAINER,
+            trainer_card_type=TrainerCardType.ITEM,
         )
         for index in range(60)
     ]
 
 
-def make_mixed_deck(prefix: str, basic_indices: set[int]) -> list[Card]:
-    cards: list[Card] = []
-    for index in range(60):
-        if index in basic_indices:
-            cards.append(
-                Card(
+def make_mixed_deck(
+    prefix: str,
+    basic_indices: set[int],
+    ) -> list[Card]:
+        """Create a 60-card deck with Basics at selected indices."""
+
+        cards: list[Card] = []
+
+        for index in range(60):
+            if index in basic_indices:
+                card = Card(
                     card_id=f"{prefix}-{index}",
                     name=f"Test Pokemon {index}",
                     card_type=CardType.POKEMON,
                     pokemon_stage=PokemonStage.BASIC,
                 )
-            )
-        else:
-            cards.append(
-                Card(
+            else:
+                card = Card(
                     card_id=f"{prefix}-{index}",
                     name=f"Test Trainer {index}",
                     card_type=CardType.TRAINER,
+                    trainer_card_type=TrainerCardType.ITEM,
                 )
-            )
-    return cards
+
+            cards.append(card)
+
+        return cards
 
 
 class ScriptedShuffler:
@@ -78,6 +86,14 @@ class ScriptedShuffler:
         cards[:] = remaining + list(
             reversed([by_id[card_id] for card_id in top_ids])
         )
+
+
+def test_make_mixed_deck_contains_selected_basic() -> None:
+    deck = make_mixed_deck("test", basic_indices={59})
+
+    assert len(deck) == 60
+    assert deck[59].is_basic_pokemon
+    assert sum(card.is_basic_pokemon for card in deck) == 1
 
 
 def make_game(seed: int = 42) -> Game:
