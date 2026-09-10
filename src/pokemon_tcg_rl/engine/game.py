@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from random import Random
 
+from pokemon_tcg_rl.engine.actions import ActionType, GameAction
 from pokemon_tcg_rl.engine.state import Card, PlayerState
 
 MAX_BENCH_SIZE = 5
@@ -47,6 +48,133 @@ class Game:
         """Return both player states in player-index order."""
 
         return self.player_one, self.player_two
+
+    def get_legal_actions(self, player_index: int) -> list[GameAction]:
+        """Return every action currently available to one player."""
+
+        self._validate_player_index(player_index)
+
+        if not self.setup_prepared:
+            return []
+
+        player = self.players[player_index]
+
+        # Setup phase
+        if not self.started:
+            if not self.initial_placement_complete[player_index]:
+                if player.active is None:
+                    return [
+                        GameAction(
+                            action_type=ActionType.CHOOSE_ACTIVE_POKEMON,
+                            player_index=player_index,
+                            card_id=card.card_id,
+                        )
+                        for card in player.hand
+                        if card.is_basic_pokemon
+                    ]
+
+                actions = [
+                    GameAction(
+                        action_type=ActionType.FINISH_INITIAL_POKEMON_PLACEMENT,
+                        player_index=player_index,
+                    )
+                ]
+
+                if len(player.bench) < MAX_BENCH_SIZE:
+                    actions.extend(
+                        GameAction(
+                            action_type=ActionType.BENCH_BASIC_POKEMON,
+                            player_index=player_index,
+                            card_id=card.card_id,
+                        )
+                        for card in player.hand
+                        if card.is_basic_pokemon
+                    )
+
+                return actions
+
+            if (
+                self.prizes_placed
+                and not self.mulligan_bonus_resolved[player_index]
+            ):
+                available = self.mulligan_bonus_available[player_index]
+
+                return [
+                    GameAction(
+                        action_type=ActionType.RESOLVE_MULLIGAN_BONUS,
+                        player_index=player_index,
+                        count=count,
+                    )
+                    for count in range(available + 1)
+                ]
+
+            return []
+
+        # Normal gameplay
+        if player_index != self.current_player:
+            return []
+
+        return [
+            GameAction(
+                action_type=ActionType.END_TURN,
+                player_index=player_index,
+            )
+        ]
+
+    def apply_action(self, action: GameAction) -> None:
+        """Validate and execute one player or agent action."""
+
+        legal_actions = self.get_legal_actions(action.player_index)
+
+        if action not in legal_actions:
+            raise ValueError("The requested action is not currently legal.")
+
+        if action.action_type == ActionType.CHOOSE_ACTIVE_POKEMON:
+            if action.card_id is None:
+                raise RuntimeError("Choose Active action is missing a card ID.")
+
+            self.choose_active_pokemon(
+                action.player_index,
+                action.card_id,
+            )
+            return
+
+        if action.action_type == ActionType.BENCH_BASIC_POKEMON:
+            if action.card_id is None:
+                raise RuntimeError("Bench action is missing a card ID.")
+
+            self.bench_basic_pokemon(
+                action.player_index,
+                action.card_id,
+            )
+            return
+
+        if (
+            action.action_type
+            == ActionType.FINISH_INITIAL_POKEMON_PLACEMENT
+        ):
+            self.finish_initial_pokemon_placement(action.player_index)
+            self._advance_setup_if_ready()
+            return
+
+        if action.action_type == ActionType.RESOLVE_MULLIGAN_BONUS:
+            if action.count is None:
+                raise RuntimeError(
+                    "Mulligan bonus action is missing a draw count."
+                )
+
+            self.resolve_mulligan_bonus(
+                action.player_index,
+                action.count,
+            )
+            self._advance_setup_if_ready()
+            return
+
+        if action.action_type == ActionType.END_TURN:
+            self.end_turn()
+            return
+
+        raise ValueError(f"Unsupported action type: {action.action_type}")
 
     def prepare_setup(self) -> None:
         """Create valid opening hands, resolving mulligans as needed.
@@ -232,6 +360,22 @@ class Game:
             raise RuntimeError("The game has not started.")
 
         self.current_player = 1 - self.current_player
+
+    def _advance_setup_if_ready(self) -> None:
+        """Perform automatic setup steps when their requirements are met."""
+
+        if (
+            not self.prizes_placed
+            and all(self.initial_placement_complete)
+        ):
+            self.place_prize_cards()
+
+        if (
+            self.prizes_placed
+            and all(self.mulligan_bonus_resolved)
+            and not self.started
+        ):
+            self.complete_setup()
 
     def _take_mulligan(self, player_index: int) -> None:
         """Reveal, reshuffle, and replace an invalid opening hand."""
