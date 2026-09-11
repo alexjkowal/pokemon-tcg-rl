@@ -1,0 +1,413 @@
+[1mdiff --git a/src/pokemon_tcg_rl/engine/__init__.py b/src/pokemon_tcg_rl/engine/__init__.py[m
+[1mindex eb51ec9..dce1d0b 100644[m
+[1m--- a/src/pokemon_tcg_rl/engine/__init__.py[m
+[1m+++ b/src/pokemon_tcg_rl/engine/__init__.py[m
+[36m@@ -3,9 +3,12 @@[m
+ from pokemon_tcg_rl.engine.actions import ActionType, GameAction[m
+ from pokemon_tcg_rl.engine.game import Game[m
+ from pokemon_tcg_rl.engine.state import ([m
+[32m+[m[32m    Attack,[m
+     Card,[m
+     CardType,[m
+[32m+[m[32m    EnergyType,[m
+     PlayerState,[m
+[32m+[m[32m    PokemonInPlay,[m
+     PokemonRule,[m
+     PokemonStage,[m
+     TrainerCardType,[m
+[36m@@ -13,11 +16,14 @@[m [mfrom pokemon_tcg_rl.engine.state import ([m
+ [m
+ __all__ = [[m
+     "ActionType",[m
+[32m+[m[32m    "Attack",[m
+     "Card",[m
+     "CardType",[m
+[32m+[m[32m    "EnergyType",[m
+     "Game",[m
+     "GameAction",[m
+     "PlayerState",[m
+[32m+[m[32m    "PokemonInPlay",[m
+     "PokemonRule",[m
+     "PokemonStage",[m
+     "TrainerCardType",[m
+[1mdiff --git a/src/pokemon_tcg_rl/engine/game.py b/src/pokemon_tcg_rl/engine/game.py[m
+[1mindex 681d65d..5cda392 100644[m
+[1m--- a/src/pokemon_tcg_rl/engine/game.py[m
+[1m+++ b/src/pokemon_tcg_rl/engine/game.py[m
+[36m@@ -2,7 +2,11 @@[m [mfrom dataclasses import dataclass, field[m
+ from random import Random[m
+ [m
+ from pokemon_tcg_rl.engine.actions import ActionType, GameAction[m
+[31m-from pokemon_tcg_rl.engine.state import Card, PlayerState[m
+[32m+[m[32mfrom pokemon_tcg_rl.engine.state import ([m
+[32m+[m[32m    Card,[m
+[32m+[m[32m    PlayerState,[m
+[32m+[m[32m    PokemonInPlay,[m
+[32m+[m[32m)[m
+ [m
+ MAX_BENCH_SIZE = 5[m
+ OPENING_HAND_SIZE = 7[m
+[36m@@ -241,7 +245,9 @@[m [mclass Game:[m
+             raise ValueError("The initial Active Pokemon must be Basic.")[m
+ [m
+         player.hand.remove(card)[m
+[31m-        player.active = card[m
+[32m+[m[32m        player.active = PokemonInPlay([m
+[32m+[m[32m            evolution_stack=[card][m
+[32m+[m[32m        )[m
+ [m
+     def bench_basic_pokemon(self, player_index: int, card_id: str) -> None:[m
+         """Move one Basic Pokemon from the hand to the Bench during setup."""[m
+[36m@@ -258,7 +264,11 @@[m [mclass Game:[m
+             raise ValueError("Only a Basic Pokemon may be placed during setup.")[m
+ [m
+         player.hand.remove(card)[m
+[31m-        player.bench.append(card)[m
+[32m+[m[32m        player.bench.append([m
+[32m+[m[32m            PokemonInPlay([m
+[32m+[m[32m                evolution_stack=[card][m
+[32m+[m[32m            )[m
+[32m+[m[32m        )[m
+ [m
+     def finish_initial_pokemon_placement(self, player_index: int) -> None:[m
+         """Mark a player's initial Active and Bench choices as complete."""[m
+[1mdiff --git a/src/pokemon_tcg_rl/engine/state.py b/src/pokemon_tcg_rl/engine/state.py[m
+[1mindex a9a6b20..9790534 100644[m
+[1m--- a/src/pokemon_tcg_rl/engine/state.py[m
+[1m+++ b/src/pokemon_tcg_rl/engine/state.py[m
+[36m@@ -38,6 +38,36 @@[m [mclass PokemonRule(StrEnum):[m
+     VSTAR = "vstar"[m
+     TERA = "tera"[m
+ [m
+[32m+[m[32mclass EnergyType(StrEnum):[m
+[32m+[m[32m    """Energy types used for Pokemon and attack costs."""[m
+[32m+[m
+[32m+[m[32m    GRASS = "grass"[m
+[32m+[m[32m    FIRE = "fire"[m
+[32m+[m[32m    WATER = "water"[m
+[32m+[m[32m    LIGHTNING = "lightning"[m
+[32m+[m[32m    PSYCHIC = "psychic"[m
+[32m+[m[32m    FIGHTING = "fighting"[m
+[32m+[m[32m    DARKNESS = "darkness"[m
+[32m+[m[32m    METAL = "metal"[m
+[32m+[m[32m    COLORLESS = "colorless"[m
+[32m+[m[32m    DRAGON = "dragon"[m
+[32m+[m[32m    FAIRY = "fairy"[m
+[32m+[m
+[32m+[m[32m@dataclass(frozen=True, slots=True)[m
+[32m+[m[32mclass Attack:[m
+[32m+[m[32m    """Printed information for one Pokemon attack."""[m
+[32m+[m
+[32m+[m[32m    name: str[m
+[32m+[m[32m    energy_cost: tuple[EnergyType, ...] = ()[m
+[32m+[m[32m    base_damage: int = 0[m
+[32m+[m[32m    text: str = ""[m
+[32m+[m
+[32m+[m[32m    def __post_init__(self) -> None:[m
+[32m+[m[32m        if not self.name:[m
+[32m+[m[32m            raise ValueError("An attack must have a name.")[m
+[32m+[m
+[32m+[m[32m        if self.base_damage < 0:[m
+[32m+[m[32m            raise ValueError("Attack damage cannot be negative.")[m
+ [m
+ @dataclass(frozen=True, slots=True)[m
+ class Card:[m
+[36m@@ -53,6 +83,12 @@[m [mclass Card:[m
+     )[m
+     trainer_card_type: TrainerCardType | None = None[m
+ [m
+[32m+[m[32m    pokemon_type: EnergyType | None = None[m
+[32m+[m[32m    hp: int | None = None[m
+[32m+[m[32m    attacks: tuple[Attack, ...] = ()[m
+[32m+[m[32m    retreat_cost: int | None = None[m
+[32m+[m[32m    energy_type: EnergyType | None = None[m
+[32m+[m
+     def __post_init__(self) -> None:[m
+         if self.card_type == CardType.POKEMON:[m
+             if self.pokemon_stage is None:[m
+[36m@@ -65,6 +101,21 @@[m [mclass Card:[m
+                     "Pokemon cards cannot specify a Trainer card type."[m
+                 )[m
+ [m
+[32m+[m[32m            if self.hp is not None and self.hp <= 0:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Pokemon HP must be greater than zero."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.retreat_cost is not None and self.retreat_cost < 0:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Pokemon retreat cost cannot be negative."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.energy_type is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Pokemon cards cannot specify an Energy card type."[m
+[32m+[m[32m                )[m
+[32m+[m
+         elif self.card_type == CardType.TRAINER:[m
+             if self.trainer_card_type is None:[m
+                 raise ValueError([m
+[36m@@ -81,6 +132,31 @@[m [mclass Card:[m
+                     "Trainer cards cannot specify Pokemon rules."[m
+                 )[m
+ [m
+[32m+[m[32m            if self.pokemon_type is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Trainer cards cannot specify a Pokemon type."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.hp is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Trainer cards cannot specify HP."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.attacks:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Trainer cards cannot specify attacks."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.retreat_cost is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Trainer cards cannot specify a retreat cost."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.energy_type is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Trainer cards cannot specify an Energy type."[m
+[32m+[m[32m                )[m
+[32m+[m
+         else:[m
+             # Energy cards[m
+             if self.pokemon_stage is not None:[m
+[36m@@ -98,6 +174,26 @@[m [mclass Card:[m
+                     "Energy cards cannot specify a Trainer card type."[m
+                 )[m
+ [m
+[32m+[m[32m            if self.pokemon_type is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Energy cards cannot specify a Pokemon type."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.hp is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Energy cards cannot specify HP."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.attacks:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Energy cards cannot specify attacks."[m
+[32m+[m[32m                )[m
+[32m+[m
+[32m+[m[32m            if self.retreat_cost is not None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "Energy cards cannot specify a retreat cost."[m
+[32m+[m[32m                )[m
+[32m+[m
+     @property[m
+     def is_basic_pokemon(self) -> bool:[m
+         """Return whether this card is a Basic Pokemon."""[m
+[36m@@ -126,6 +222,56 @@[m [mclass Card:[m
+         return bool(self.pokemon_rules)[m
+ [m
+ [m
+[32m+[m[32m@dataclass(slots=True)[m
+[32m+[m[32mclass PokemonInPlay:[m
+[32m+[m[32m    """Mutable state for one Pokemon currently in play."""[m
+[32m+[m
+[32m+[m[32m    evolution_stack: list[Card][m
+[32m+[m[32m    damage: int = 0[m
+[32m+[m[32m    attached_energy: list[Card] = field(default_factory=list)[m
+[32m+[m[32m    attached_tool: Card | None = None[m
+[32m+[m
+[32m+[m[32m    def __post_init__(self) -> None:[m
+[32m+[m[32m        if not self.evolution_stack:[m
+[32m+[m[32m            raise ValueError([m
+[32m+[m[32m                "A Pokemon in play must contain at least one Pokemon card."[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        if any([m
+[32m+[m[32m            card.card_type != CardType.POKEMON[m
+[32m+[m[32m            for card in self.evolution_stack[m
+[32m+[m[32m        ):[m
+[32m+[m[32m            raise ValueError([m
+[32m+[m[32m                "An evolution stack may contain only Pokemon cards."[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        if self.damage < 0:[m
+[32m+[m[32m            raise ValueError("Pokemon damage cannot be negative.")[m
+[32m+[m
+[32m+[m[32m        if any([m
+[32m+[m[32m            card.card_type != CardType.ENERGY[m
+[32m+[m[32m            for card in self.attached_energy[m
+[32m+[m[32m        ):[m
+[32m+[m[32m            raise ValueError([m
+[32m+[m[32m                "Attached Energy must contain only Energy cards."[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m        if ([m
+[32m+[m[32m            self.attached_tool is not None[m
+[32m+[m[32m            and ([m
+[32m+[m[32m                self.attached_tool.card_type != CardType.TRAINER[m
+[32m+[m[32m                or self.attached_tool.trainer_card_type[m
+[32m+[m[32m                != TrainerCardType.TOOL[m
+[32m+[m[32m            )[m
+[32m+[m[32m        ):[m
+[32m+[m[32m            raise ValueError("Attached Tool must be a Pokemon Tool card.")[m
+[32m+[m
+[32m+[m[32m    @property[m
+[32m+[m[32m    def current_card(self) -> Card:[m
+[32m+[m[32m        """Return the topmost Pokemon card in the evolution stack."""[m
+[32m+[m
+[32m+[m[32m        return self.evolution_stack[-1][m
+[32m+[m
+ @dataclass(slots=True)[m
+ class PlayerState:[m
+     """All zones belonging to one player."""[m
+[36m@@ -134,5 +280,5 @@[m [mclass PlayerState:[m
+     hand: list[Card] = field(default_factory=list)[m
+     prizes: list[Card] = field(default_factory=list)[m
+     discard: list[Card] = field(default_factory=list)[m
+[31m-    active: Card | None = None[m
+[31m-    bench: list[Card] = field(default_factory=list)[m
+\ No newline at end of file[m
+[32m+[m[32m    active: PokemonInPlay | None = None[m
+[32m+[m[32m    bench: list[PokemonInPlay] = field(default_factory=list)[m
+\ No newline at end of file[m
+[1mdiff --git a/tests/test_state.py b/tests/test_state.py[m
+[1mindex 5279d6a..9571afc 100644[m
+[1m--- a/tests/test_state.py[m
+[1m+++ b/tests/test_state.py[m
+[36m@@ -1,8 +1,11 @@[m
+ import pytest[m
+ [m
+ from pokemon_tcg_rl.engine.state import ([m
+[32m+[m[32m    Attack,[m
+     Card,[m
+     CardType,[m
+[32m+[m[32m    EnergyType,[m
+[32m+[m[32m    PokemonInPlay,[m
+     PokemonRule,[m
+     PokemonStage,[m
+     TrainerCardType,[m
+[36m@@ -61,4 +64,120 @@[m [mdef test_energy_cannot_have_pokemon_rules() -> None:[m
+             name="Test Energy",[m
+             card_type=CardType.ENERGY,[m
+             pokemon_rules=frozenset({PokemonRule.TERA}),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32mdef test_pokemon_in_play_starts_with_clean_state() -> None:[m
+[32m+[m[32m    card = Card([m
+[32m+[m[32m        card_id="basic-001",[m
+[32m+[m[32m        name="Test Pokemon",[m
+[32m+[m[32m        card_type=CardType.POKEMON,[m
+[32m+[m[32m        pokemon_stage=PokemonStage.BASIC,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    pokemon = PokemonInPlay([m
+[32m+[m[32m        evolution_stack=[card][m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    assert pokemon.current_card == card[m
+[32m+[m[32m    assert pokemon.damage == 0[m
+[32m+[m[32m    assert pokemon.attached_energy == [][m
+[32m+[m[32m    assert pokemon.attached_tool is None[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_pokemon_in_play_damage_is_mutable() -> None:[m
+[32m+[m[32m    card = Card([m
+[32m+[m[32m        card_id="basic-001",[m
+[32m+[m[32m        name="Test Pokemon",[m
+[32m+[m[32m        card_type=CardType.POKEMON,[m
+[32m+[m[32m        pokemon_stage=PokemonStage.BASIC,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    pokemon = PokemonInPlay([m
+[32m+[m[32m        evolution_stack=[card][m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    pokemon.damage = 50[m
+[32m+[m
+[32m+[m[32m    assert pokemon.damage == 50[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_pokemon_in_play_rejects_non_pokemon_stack() -> None:[m
+[32m+[m[32m    energy = Card([m
+[32m+[m[32m        card_id="energy-001",[m
+[32m+[m[32m        name="Test Energy",[m
+[32m+[m[32m        card_type=CardType.ENERGY,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    with pytest.raises([m
+[32m+[m[32m        ValueError,[m
+[32m+[m[32m        match="only Pokemon cards",[m
+[32m+[m[32m    ):[m
+[32m+[m[32m        PokemonInPlay([m
+[32m+[m[32m            evolution_stack=[energy][m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32mdef test_attack_stores_printed_combat_data() -> None:[m
+[32m+[m[32m    attack = Attack([m
+[32m+[m[32m        name="Test Attack",[m
+[32m+[m[32m        energy_cost=([m
+[32m+[m[32m            EnergyType.FIRE,[m
+[32m+[m[32m            EnergyType.COLORLESS,[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        base_damage=50,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    assert attack.name == "Test Attack"[m
+[32m+[m[32m    assert attack.energy_cost == ([m
+[32m+[m[32m        EnergyType.FIRE,[m
+[32m+[m[32m        EnergyType.COLORLESS,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert attack.base_damage == 50[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_attack_rejects_negative_damage() -> None:[m
+[32m+[m[32m    with pytest.raises([m
+[32m+[m[32m        ValueError,[m
+[32m+[m[32m        match="cannot be negative",[m
+[32m+[m[32m    ):[m
+[32m+[m[32m        Attack([m
+[32m+[m[32m            name="Invalid Attack",[m
+[32m+[m[32m            base_damage=-10,[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_pokemon_can_store_combat_data() -> None:[m
+[32m+[m[32m    attack = Attack([m
+[32m+[m[32m        name="Test Attack",[m
+[32m+[m[32m        energy_cost=(EnergyType.LIGHTNING,),[m
+[32m+[m[32m        base_damage=30,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    card = Card([m
+[32m+[m[32m        card_id="pokemon-001",[m
+[32m+[m[32m        name="Test Pokemon",[m
+[32m+[m[32m        card_type=CardType.POKEMON,[m
+[32m+[m[32m        pokemon_stage=PokemonStage.BASIC,[m
+[32m+[m[32m        pokemon_type=EnergyType.LIGHTNING,[m
+[32m+[m[32m        hp=70,[m
+[32m+[m[32m        attacks=(attack,),[m
+[32m+[m[32m        retreat_cost=1,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    assert card.hp == 70[m
+[32m+[m[32m    assert card.pokemon_type == EnergyType.LIGHTNING[m
+[32m+[m[32m    assert card.attacks == (attack,)[m
+[32m+[m[32m    assert card.retreat_cost == 1[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_pokemon_rejects_nonpositive_hp() -> None:[m
+[32m+[m[32m    with pytest.raises([m
+[32m+[m[32m        ValueError,[m
+[32m+[m[32m        match="greater than zero",[m
+[32m+[m[32m    ):[m
+[32m+[m[32m        Card([m
+[32m+[m[32m            card_id="pokemon-001",[m
+[32m+[m[32m            name="Invalid Pokemon",[m
+[32m+[m[32m            card_type=CardType.POKEMON,[m
+[32m+[m[32m            pokemon_stage=PokemonStage.BASIC,[m
+[32m+[m[32m            hp=0,[m
+         )[m
+\ No newline at end of file[m

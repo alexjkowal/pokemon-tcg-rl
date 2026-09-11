@@ -38,6 +38,36 @@ class PokemonRule(StrEnum):
     VSTAR = "vstar"
     TERA = "tera"
 
+class EnergyType(StrEnum):
+    """Energy types used for Pokemon and attack costs."""
+
+    GRASS = "grass"
+    FIRE = "fire"
+    WATER = "water"
+    LIGHTNING = "lightning"
+    PSYCHIC = "psychic"
+    FIGHTING = "fighting"
+    DARKNESS = "darkness"
+    METAL = "metal"
+    COLORLESS = "colorless"
+    DRAGON = "dragon"
+    FAIRY = "fairy"
+
+@dataclass(frozen=True, slots=True)
+class Attack:
+    """Printed information for one Pokemon attack."""
+
+    name: str
+    energy_cost: tuple[EnergyType, ...] = ()
+    base_damage: int = 0
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("An attack must have a name.")
+
+        if self.base_damage < 0:
+            raise ValueError("Attack damage cannot be negative.")
 
 @dataclass(frozen=True, slots=True)
 class Card:
@@ -53,6 +83,12 @@ class Card:
     )
     trainer_card_type: TrainerCardType | None = None
 
+    pokemon_type: EnergyType | None = None
+    hp: int | None = None
+    attacks: tuple[Attack, ...] = ()
+    retreat_cost: int | None = None
+    energy_type: EnergyType | None = None
+
     def __post_init__(self) -> None:
         if self.card_type == CardType.POKEMON:
             if self.pokemon_stage is None:
@@ -63,6 +99,21 @@ class Card:
             if self.trainer_card_type is not None:
                 raise ValueError(
                     "Pokemon cards cannot specify a Trainer card type."
+                )
+
+            if self.hp is not None and self.hp <= 0:
+                raise ValueError(
+                    "Pokemon HP must be greater than zero."
+                )
+
+            if self.retreat_cost is not None and self.retreat_cost < 0:
+                raise ValueError(
+                    "Pokemon retreat cost cannot be negative."
+                )
+
+            if self.energy_type is not None:
+                raise ValueError(
+                    "Pokemon cards cannot specify an Energy card type."
                 )
 
         elif self.card_type == CardType.TRAINER:
@@ -81,6 +132,31 @@ class Card:
                     "Trainer cards cannot specify Pokemon rules."
                 )
 
+            if self.pokemon_type is not None:
+                raise ValueError(
+                    "Trainer cards cannot specify a Pokemon type."
+                )
+
+            if self.hp is not None:
+                raise ValueError(
+                    "Trainer cards cannot specify HP."
+                )
+
+            if self.attacks:
+                raise ValueError(
+                    "Trainer cards cannot specify attacks."
+                )
+
+            if self.retreat_cost is not None:
+                raise ValueError(
+                    "Trainer cards cannot specify a retreat cost."
+                )
+
+            if self.energy_type is not None:
+                raise ValueError(
+                    "Trainer cards cannot specify an Energy type."
+                )
+
         else:
             # Energy cards
             if self.pokemon_stage is not None:
@@ -96,6 +172,26 @@ class Card:
             if self.trainer_card_type is not None:
                 raise ValueError(
                     "Energy cards cannot specify a Trainer card type."
+                )
+
+            if self.pokemon_type is not None:
+                raise ValueError(
+                    "Energy cards cannot specify a Pokemon type."
+                )
+
+            if self.hp is not None:
+                raise ValueError(
+                    "Energy cards cannot specify HP."
+                )
+
+            if self.attacks:
+                raise ValueError(
+                    "Energy cards cannot specify attacks."
+                )
+
+            if self.retreat_cost is not None:
+                raise ValueError(
+                    "Energy cards cannot specify a retreat cost."
                 )
 
     @property
@@ -127,6 +223,56 @@ class Card:
 
 
 @dataclass(slots=True)
+class PokemonInPlay:
+    """Mutable state for one Pokemon currently in play."""
+
+    evolution_stack: list[Card]
+    damage: int = 0
+    attached_energy: list[Card] = field(default_factory=list)
+    attached_tool: Card | None = None
+
+    def __post_init__(self) -> None:
+        if not self.evolution_stack:
+            raise ValueError(
+                "A Pokemon in play must contain at least one Pokemon card."
+            )
+
+        if any(
+            card.card_type != CardType.POKEMON
+            for card in self.evolution_stack
+        ):
+            raise ValueError(
+                "An evolution stack may contain only Pokemon cards."
+            )
+
+        if self.damage < 0:
+            raise ValueError("Pokemon damage cannot be negative.")
+
+        if any(
+            card.card_type != CardType.ENERGY
+            for card in self.attached_energy
+        ):
+            raise ValueError(
+                "Attached Energy must contain only Energy cards."
+            )
+
+        if (
+            self.attached_tool is not None
+            and (
+                self.attached_tool.card_type != CardType.TRAINER
+                or self.attached_tool.trainer_card_type
+                != TrainerCardType.TOOL
+            )
+        ):
+            raise ValueError("Attached Tool must be a Pokemon Tool card.")
+
+    @property
+    def current_card(self) -> Card:
+        """Return the topmost Pokemon card in the evolution stack."""
+
+        return self.evolution_stack[-1]
+
+@dataclass(slots=True)
 class PlayerState:
     """All zones belonging to one player."""
 
@@ -134,5 +280,5 @@ class PlayerState:
     hand: list[Card] = field(default_factory=list)
     prizes: list[Card] = field(default_factory=list)
     discard: list[Card] = field(default_factory=list)
-    active: Card | None = None
-    bench: list[Card] = field(default_factory=list)
+    active: PokemonInPlay | None = None
+    bench: list[PokemonInPlay] = field(default_factory=list)

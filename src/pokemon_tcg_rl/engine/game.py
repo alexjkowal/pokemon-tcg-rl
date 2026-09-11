@@ -2,7 +2,11 @@ from dataclasses import dataclass, field
 from random import Random
 
 from pokemon_tcg_rl.engine.actions import ActionType, GameAction
-from pokemon_tcg_rl.engine.state import Card, PlayerState
+from pokemon_tcg_rl.engine.state import (
+    Card,
+    PlayerState,
+    PokemonInPlay,
+)
 
 MAX_BENCH_SIZE = 5
 OPENING_HAND_SIZE = 7
@@ -241,7 +245,9 @@ class Game:
             raise ValueError("The initial Active Pokemon must be Basic.")
 
         player.hand.remove(card)
-        player.active = card
+        player.active = PokemonInPlay(
+            evolution_stack=[card]
+        )
 
     def bench_basic_pokemon(self, player_index: int, card_id: str) -> None:
         """Move one Basic Pokemon from the hand to the Bench during setup."""
@@ -258,7 +264,11 @@ class Game:
             raise ValueError("Only a Basic Pokemon may be placed during setup.")
 
         player.hand.remove(card)
-        player.bench.append(card)
+        player.bench.append(
+            PokemonInPlay(
+                evolution_stack=[card]
+            )
+        )
 
     def finish_initial_pokemon_placement(self, player_index: int) -> None:
         """Mark a player's initial Active and Bench choices as complete."""

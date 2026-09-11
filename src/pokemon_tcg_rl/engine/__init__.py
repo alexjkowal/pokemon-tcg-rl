@@ -3,9 +3,12 @@
 from pokemon_tcg_rl.engine.actions import ActionType, GameAction
 from pokemon_tcg_rl.engine.game import Game
 from pokemon_tcg_rl.engine.state import (
+    Attack,
     Card,
     CardType,
+    EnergyType,
     PlayerState,
+    PokemonInPlay,
     PokemonRule,
     PokemonStage,
     TrainerCardType,
@@ -13,11 +16,14 @@ from pokemon_tcg_rl.engine.state import (
 
 __all__ = [
     "ActionType",
+    "Attack",
     "Card",
     "CardType",
+    "EnergyType",
     "Game",
     "GameAction",
     "PlayerState",
+    "PokemonInPlay",
     "PokemonRule",
     "PokemonStage",
     "TrainerCardType",
