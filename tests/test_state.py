@@ -181,3 +181,30 @@ def test_pokemon_rejects_nonpositive_hp() -> None:
             pokemon_stage=PokemonStage.BASIC,
             hp=0,
         )
+
+def test_evolution_card_stores_evolves_from() -> None:
+    card = Card(
+        card_id="metang-001",
+        name="Metang",
+        card_type=CardType.POKEMON,
+        pokemon_stage=PokemonStage.STAGE_1,
+        evolves_from="Beldum",
+        hp=100,
+    )
+
+    assert card.evolves_from == "Beldum"
+
+
+def test_basic_pokemon_rejects_evolves_from() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Basic Pokemon cannot",
+    ):
+        Card(
+            card_id="beldum-001",
+            name="Beldum",
+            card_type=CardType.POKEMON,
+            pokemon_stage=PokemonStage.BASIC,
+            evolves_from="Something",
+            hp=60,
+        )

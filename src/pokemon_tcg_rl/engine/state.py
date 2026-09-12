@@ -81,8 +81,9 @@ class Card:
     pokemon_rules: frozenset[PokemonRule] = field(
         default_factory=frozenset
     )
+    evolves_from: str | None = None
     trainer_card_type: TrainerCardType | None = None
-
+    
     pokemon_type: EnergyType | None = None
     hp: int | None = None
     attacks: tuple[Attack, ...] = ()
@@ -94,6 +95,14 @@ class Card:
             if self.pokemon_stage is None:
                 raise ValueError(
                     "Pokemon cards must specify a Pokemon stage."
+                )
+
+            if (
+                self.pokemon_stage == PokemonStage.BASIC
+                and self.evolves_from is not None
+            ):
+                raise ValueError(
+                    "Basic Pokemon cannot specify an evolves-from Pokemon."
                 )
 
             if self.trainer_card_type is not None:
@@ -157,6 +166,11 @@ class Card:
                     "Trainer cards cannot specify an Energy type."
                 )
 
+            if self.evolves_from is not None:
+                raise ValueError(
+                    "Trainer cards cannot specify an evolves-from Pokemon."
+                )
+
         else:
             # Energy cards
             if self.pokemon_stage is not None:
@@ -192,6 +206,11 @@ class Card:
             if self.retreat_cost is not None:
                 raise ValueError(
                     "Energy cards cannot specify a retreat cost."
+                )
+
+            if self.evolves_from is not None:
+                raise ValueError(
+                    "Energy cards cannot specify an evolves-from Pokemon."
                 )
 
     @property
@@ -230,11 +249,26 @@ class PokemonInPlay:
     damage: int = 0
     attached_energy: list[Card] = field(default_factory=list)
     attached_tool: Card | None = None
+    entered_play_turn: int = 0
+    last_evolved_turn: int | None = None
 
     def __post_init__(self) -> None:
         if not self.evolution_stack:
             raise ValueError(
                 "A Pokemon in play must contain at least one Pokemon card."
+            )
+
+        if self.entered_play_turn < 0:
+            raise ValueError(
+                "Entered-play turn cannot be negative."
+            )
+
+        if (
+            self.last_evolved_turn is not None
+            and self.last_evolved_turn < 0
+        ):
+            raise ValueError(
+                "Last-evolved turn cannot be negative."
             )
 
         if any(
@@ -265,6 +299,19 @@ class PokemonInPlay:
             )
         ):
             raise ValueError("Attached Tool must be a Pokemon Tool card.")
+
+        if self.entered_play_turn < 0:
+            raise ValueError(
+                "Entered-play turn cannot be negative."
+            )
+
+        if (
+            self.last_evolved_turn is not None
+            and self.last_evolved_turn < 0
+        ):
+            raise ValueError(
+                "Last-evolved turn cannot be negative."
+            )
 
     @property
     def current_card(self) -> Card:

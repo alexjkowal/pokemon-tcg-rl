@@ -13,8 +13,8 @@ class ActionType(StrEnum):
         "finish_initial_pokemon_placement"
     )
     RESOLVE_MULLIGAN_BONUS = "resolve_mulligan_bonus"
-
     PLAY_BASIC_POKEMON = "play_basic_pokemon"
+    EVOLVE_POKEMON = "evolve_pokemon"
     ATTACH_ENERGY = "attach_energy"
 
     END_TURN = "end_turn"
@@ -68,20 +68,25 @@ class GameAction:
 
             return
 
-        if self.action_type == ActionType.ATTACH_ENERGY:
+        actions_requiring_pokemon_target = {
+            ActionType.ATTACH_ENERGY,
+            ActionType.EVOLVE_POKEMON,
+        }
+
+        if self.action_type in actions_requiring_pokemon_target:
             if not self.card_id:
                 raise ValueError(
-                    "Attach Energy actions require a card ID."
+                    f"{self.action_type} actions require a card ID."
                 )
 
             if self.count is not None:
                 raise ValueError(
-                    "Attach Energy actions cannot include a count."
+                    f"{self.action_type} actions cannot include a count."
                 )
 
             if self.target_zone is None:
                 raise ValueError(
-                    "Attach Energy actions require a target zone."
+                    f"{self.action_type} actions require a target zone."
                 )
 
             if self.target_zone == PokemonZone.ACTIVE:

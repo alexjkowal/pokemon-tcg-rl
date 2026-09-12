@@ -120,3 +120,27 @@ def test_active_target_rejects_index() -> None:
             target_zone=PokemonZone.ACTIVE,
             target_index=0,
         )
+
+def test_evolution_action_can_target_active() -> None:
+    action = GameAction(
+        action_type=ActionType.EVOLVE_POKEMON,
+        player_index=0,
+        card_id="metang-001",
+        target_zone=PokemonZone.ACTIVE,
+    )
+
+    assert action.card_id == "metang-001"
+    assert action.target_zone == PokemonZone.ACTIVE
+    assert action.target_index is None
+
+def test_evolution_to_bench_requires_index() -> None:
+    with pytest.raises(
+        ValueError,
+        match="require an index",
+    ):
+        GameAction(
+            action_type=ActionType.EVOLVE_POKEMON,
+            player_index=0,
+            card_id="metang-001",
+            target_zone=PokemonZone.BENCH,
+        )

@@ -21,13 +21,16 @@ DECK_SIZE = 60
 
 @dataclass(slots=True)
 class Game:
-    """A minimal two-player Pokemon TCG game."""
-
     player_one: PlayerState
     player_two: PlayerState
     seed: int | None = None
 
     current_player: int = 0
+    turn_number: int = 0
+    player_turn_counts: list[int] = field(
+        default_factory=lambda: [0, 0]
+    )
+
     started: bool = False
     setup_prepared: bool = False
     prizes_placed: bool = False
@@ -142,6 +145,50 @@ class Game:
                 if card.is_basic_pokemon
             )
 
+        # Evolve eligible Pokemon.
+        evolution_cards = [
+            card
+            for card in player.hand
+            if (
+                card.card_type == CardType.POKEMON
+                and not card.is_basic_pokemon
+                and card.evolves_from is not None
+            )
+        ]
+
+        if player.active is not None:
+            actions.extend(
+                GameAction(
+                    action_type=ActionType.EVOLVE_POKEMON,
+                    player_index=player_index,
+                    card_id=card.card_id,
+                    target_zone=PokemonZone.ACTIVE,
+                )
+                for card in evolution_cards
+                if self._can_evolve(
+                    player_index,
+                    player.active,
+                    card,
+                )
+            )
+
+        for bench_index, pokemon in enumerate(player.bench):
+            actions.extend(
+                GameAction(
+                    action_type=ActionType.EVOLVE_POKEMON,
+                    player_index=player_index,
+                    card_id=card.card_id,
+                    target_zone=PokemonZone.BENCH,
+                    target_index=bench_index,
+                )
+                for card in evolution_cards
+                if self._can_evolve(
+                    player_index,
+                    pokemon,
+                    card,
+                )
+            )
+
         # Attach one Energy from the hand per turn.
         if not player.energy_attached_this_turn:
             energy_cards = [
@@ -233,6 +280,25 @@ class Game:
             self.play_basic_pokemon(
                 action.player_index,
                 action.card_id,
+            )
+            return
+
+        if action.action_type == ActionType.EVOLVE_POKEMON:
+            if action.card_id is None:
+                raise RuntimeError(
+                    "Evolution action is missing a card ID."
+                )
+
+            if action.target_zone is None:
+                raise RuntimeError(
+                    "Evolution action is missing a target."
+                )
+
+            self.evolve_pokemon(
+                player_index=action.player_index,
+                card_id=action.card_id,
+                target_zone=action.target_zone,
+                target_index=action.target_index,
             )
             return
 
@@ -467,9 +533,67 @@ class Game:
         player.hand.remove(card)
         player.bench.append(
             PokemonInPlay(
-                evolution_stack=[card]
+                evolution_stack=[card],
+                entered_play_turn=self.turn_number,
             )
         )
+
+    def evolve_pokemon(
+    self,
+    player_index: int,
+    card_id: str,
+    target_zone: PokemonZone,
+    target_index: int | None = None,
+    ) -> None:
+        """Evolve one Pokemon using a card from the player's hand."""
+
+        self._require_current_turn(player_index)
+        player = self.players[player_index]
+
+        card = self._find_card_in_hand(
+            player,
+            card_id,
+        )
+
+        if (
+            card.card_type != CardType.POKEMON
+            or card.is_basic_pokemon
+        ):
+            raise ValueError(
+                "Only an Evolution Pokemon may evolve a Pokemon."
+            )
+
+        if card.evolves_from is None:
+            raise ValueError(
+                "Evolution card must specify what Pokemon it evolves from."
+            )
+
+        target = self._get_pokemon_target(
+            player,
+            target_zone,
+            target_index,
+        )
+
+        if card.evolves_from != target.current_card.name:
+            raise ValueError(
+                f"{card.name} evolves from "
+                f"{card.evolves_from}, not "
+                f"{target.current_card.name}."
+            )
+
+        if not self._can_evolve(
+            player_index,
+            target,
+            card,
+        ):
+            raise RuntimeError(
+                "This Pokemon cannot evolve this turn."
+            )
+
+        player.hand.remove(card)
+        target.evolution_stack.append(card)
+        target.last_evolved_turn = self.turn_number
+
 
     def attach_energy(
         self,
@@ -506,7 +630,7 @@ class Game:
         player.energy_attached_this_turn = True
 
     def end_turn(self) -> None:
-        """Pass control to the other player."""
+        """Finish the current turn and begin the opponent's turn."""
 
         if not self.started:
             raise RuntimeError("The game has not started.")
@@ -515,6 +639,18 @@ class Game:
         player.energy_attached_this_turn = False
 
         self.current_player = 1 - self.current_player
+        self._begin_turn()
+
+    def _begin_turn(self) -> None:
+        """Begin the current player's turn."""
+
+        self.turn_number += 1
+        self.player_turn_counts[self.current_player] += 1
+
+        player = self.players[self.current_player]
+        player.energy_attached_this_turn = False
+
+        self._draw_one(player)
 
     def _advance_setup_if_ready(self) -> None:
         """Perform automatic setup steps when their requirements are met."""
@@ -660,3 +796,38 @@ class Game:
 
         if player_index != self.current_player:
             raise RuntimeError("It is not this player's turn.")
+
+    def _can_evolve(
+        self,
+        player_index: int,
+        pokemon: PokemonInPlay,
+        evolution_card: Card,
+    ) -> bool:
+        """Return whether a Pokemon can legally evolve with this card."""
+
+        if evolution_card.card_type != CardType.POKEMON:
+            return False
+
+        if evolution_card.is_basic_pokemon:
+            return False
+
+        if evolution_card.evolves_from is None:
+            return False
+
+        # A player cannot evolve during their first turn.
+        if self.player_turn_counts[player_index] <= 1:
+            return False
+
+        # A Pokemon cannot evolve on the turn it entered play.
+        if pokemon.entered_play_turn == self.turn_number:
+            return False
+
+        # A Pokemon cannot evolve twice during the same turn.
+        if pokemon.last_evolved_turn == self.turn_number:
+            return False
+
+        # Exact full-name comparison is intentional.
+        return (
+            evolution_card.evolves_from
+            == pokemon.current_card.name
+        )
