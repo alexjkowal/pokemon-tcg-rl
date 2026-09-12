@@ -1,9 +1,14 @@
 from dataclasses import dataclass, field
 from random import Random
 
-from pokemon_tcg_rl.engine.actions import ActionType, GameAction
+from pokemon_tcg_rl.engine.actions import (
+    ActionType,
+    GameAction,
+    PokemonZone,
+)
 from pokemon_tcg_rl.engine.state import (
     Card,
+    CardType,
     PlayerState,
     PokemonInPlay,
 )
@@ -118,12 +123,57 @@ class Game:
         if player_index != self.current_player:
             return []
 
-        return [
+        actions = [
             GameAction(
                 action_type=ActionType.END_TURN,
                 player_index=player_index,
             )
         ]
+
+        # Play Basic Pokemon from the hand to the Bench.
+        if len(player.bench) < MAX_BENCH_SIZE:
+            actions.extend(
+                GameAction(
+                    action_type=ActionType.PLAY_BASIC_POKEMON,
+                    player_index=player_index,
+                    card_id=card.card_id,
+                )
+                for card in player.hand
+                if card.is_basic_pokemon
+            )
+
+        # Attach one Energy from the hand per turn.
+        if not player.energy_attached_this_turn:
+            energy_cards = [
+                card
+                for card in player.hand
+                if card.card_type == CardType.ENERGY
+            ]
+
+            if player.active is not None:
+                actions.extend(
+                    GameAction(
+                        action_type=ActionType.ATTACH_ENERGY,
+                        player_index=player_index,
+                        card_id=card.card_id,
+                        target_zone=PokemonZone.ACTIVE,
+                    )
+                    for card in energy_cards
+                )
+
+            for bench_index, _ in enumerate(player.bench):
+                actions.extend(
+                    GameAction(
+                        action_type=ActionType.ATTACH_ENERGY,
+                        player_index=player_index,
+                        card_id=card.card_id,
+                        target_zone=PokemonZone.BENCH,
+                        target_index=bench_index,
+                    )
+                    for card in energy_cards
+                )
+
+        return actions
 
     def apply_action(self, action: GameAction) -> None:
         """Validate and execute one player or agent action."""
@@ -172,6 +222,37 @@ class Game:
                 action.count,
             )
             self._advance_setup_if_ready()
+            return
+
+        if action.action_type == ActionType.PLAY_BASIC_POKEMON:
+            if action.card_id is None:
+                raise RuntimeError(
+                    "Play Basic action is missing a card ID."
+                )
+
+            self.play_basic_pokemon(
+                action.player_index,
+                action.card_id,
+            )
+            return
+
+        if action.action_type == ActionType.ATTACH_ENERGY:
+            if action.card_id is None:
+                raise RuntimeError(
+                    "Attach Energy action is missing a card ID."
+                )
+
+            if action.target_zone is None:
+                raise RuntimeError(
+                    "Attach Energy action is missing a target."
+                )
+
+            self.attach_energy(
+                player_index=action.player_index,
+                card_id=action.card_id,
+                target_zone=action.target_zone,
+                target_index=action.target_index,
+            )
             return
 
         if action.action_type == ActionType.END_TURN:
@@ -363,11 +444,75 @@ class Game:
         self._validate_player_index(player_index)
         return self._draw_one(self.players[player_index])
 
+    def play_basic_pokemon(
+        self,
+        player_index: int,
+        card_id: str,
+    ) -> None:
+        """Play one Basic Pokemon from the hand to the Bench."""
+
+        self._require_current_turn(player_index)
+        player = self.players[player_index]
+
+        if len(player.bench) >= MAX_BENCH_SIZE:
+            raise RuntimeError("The Bench is full.")
+
+        card = self._find_card_in_hand(player, card_id)
+
+        if not card.is_basic_pokemon:
+            raise ValueError(
+                "Only a Basic Pokemon may be played to the Bench."
+            )
+
+        player.hand.remove(card)
+        player.bench.append(
+            PokemonInPlay(
+                evolution_stack=[card]
+            )
+        )
+
+    def attach_energy(
+        self,
+        player_index: int,
+        card_id: str,
+        target_zone: PokemonZone,
+        target_index: int | None = None,
+    ) -> None:
+        """Attach one Energy card from the hand during the current turn."""
+
+        self._require_current_turn(player_index)
+        player = self.players[player_index]
+
+        if player.energy_attached_this_turn:
+            raise RuntimeError(
+                "This player has already attached an Energy this turn."
+            )
+
+        card = self._find_card_in_hand(player, card_id)
+
+        if card.card_type != CardType.ENERGY:
+            raise ValueError(
+                "Only an Energy card may be attached as the turn attachment."
+            )
+
+        target = self._get_pokemon_target(
+            player,
+            target_zone,
+            target_index,
+        )
+
+        player.hand.remove(card)
+        target.attached_energy.append(card)
+        player.energy_attached_this_turn = True
+
     def end_turn(self) -> None:
         """Pass control to the other player."""
 
         if not self.started:
             raise RuntimeError("The game has not started.")
+
+        player = self.players[self.current_player]
+        player.energy_attached_this_turn = False
 
         self.current_player = 1 - self.current_player
 
@@ -466,3 +611,52 @@ class Game:
     def _validate_player_index(player_index: int) -> None:
         if player_index not in (0, 1):
             raise ValueError("Player index must be 0 or 1.")
+
+    @staticmethod
+    def _get_pokemon_target(
+        player: PlayerState,
+        target_zone: PokemonZone,
+        target_index: int | None,
+    ) -> PokemonInPlay:
+        """Return a Pokemon from a player's Active Spot or Bench."""
+
+        if target_zone == PokemonZone.ACTIVE:
+            if target_index is not None:
+                raise ValueError(
+                    "Active Pokemon targets cannot include an index."
+                )
+
+            if player.active is None:
+                raise RuntimeError(
+                    "This player does not have an Active Pokemon."
+                )
+
+            return player.active
+
+        if target_zone == PokemonZone.BENCH:
+            if target_index is None:
+                raise ValueError(
+                    "Bench Pokemon targets require an index."
+                )
+
+            if not 0 <= target_index < len(player.bench):
+                raise ValueError(
+                    "Bench target index is out of range."
+                )
+
+            return player.bench[target_index]
+
+        raise ValueError(
+            f"Unsupported Pokemon target zone: {target_zone}"
+        )
+
+    def _require_current_turn(self, player_index: int) -> None:
+        """Require an action to come from the current player."""
+
+        if not self.started:
+            raise RuntimeError("The game has not started.")
+
+        self._validate_player_index(player_index)
+
+        if player_index != self.current_player:
+            raise RuntimeError("It is not this player's turn.")

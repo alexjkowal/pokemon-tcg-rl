@@ -282,3 +282,4 @@ class PlayerState:
     discard: list[Card] = field(default_factory=list)
     active: PokemonInPlay | None = None
     bench: list[PokemonInPlay] = field(default_factory=list)
+    energy_attached_this_turn: bool = False

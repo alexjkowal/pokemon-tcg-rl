@@ -128,14 +128,17 @@ def test_only_current_player_can_act_after_setup() -> None:
     player_zero_actions = game.get_legal_actions(0)
     player_one_actions = game.get_legal_actions(1)
 
-    assert player_zero_actions == [
-        GameAction(
-            action_type=ActionType.END_TURN,
-            player_index=0,
-        )
-    ]
-    assert player_one_actions == []
+    assert GameAction(
+        action_type=ActionType.END_TURN,
+        player_index=0,
+    ) in player_zero_actions
 
+    assert all(
+        action.player_index == 0
+        for action in player_zero_actions
+    )
+
+    assert player_one_actions == []
 
 def test_end_turn_action_changes_current_player() -> None:
     game = make_game()

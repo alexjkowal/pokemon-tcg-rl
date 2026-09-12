@@ -2,7 +2,11 @@
 
 import pytest
 
-from pokemon_tcg_rl.engine.actions import ActionType, GameAction
+from pokemon_tcg_rl.engine.actions import (
+    ActionType,
+    GameAction,
+    PokemonZone,
+)
 
 
 def test_choose_active_action_is_valid() -> None:
@@ -76,4 +80,43 @@ def test_action_rejects_invalid_player_index() -> None:
         GameAction(
             action_type=ActionType.END_TURN,
             player_index=2,
+        )
+
+def test_attach_energy_to_active_is_valid() -> None:
+    action = GameAction(
+        action_type=ActionType.ATTACH_ENERGY,
+        player_index=0,
+        card_id="energy-001",
+        target_zone=PokemonZone.ACTIVE,
+    )
+
+    assert action.card_id == "energy-001"
+    assert action.target_zone == PokemonZone.ACTIVE
+    assert action.target_index is None
+
+
+def test_attach_energy_to_bench_requires_index() -> None:
+    with pytest.raises(
+        ValueError,
+        match="require an index",
+    ):
+        GameAction(
+            action_type=ActionType.ATTACH_ENERGY,
+            player_index=0,
+            card_id="energy-001",
+            target_zone=PokemonZone.BENCH,
+        )
+
+
+def test_active_target_rejects_index() -> None:
+    with pytest.raises(
+        ValueError,
+        match="cannot include an index",
+    ):
+        GameAction(
+            action_type=ActionType.ATTACH_ENERGY,
+            player_index=0,
+            card_id="energy-001",
+            target_zone=PokemonZone.ACTIVE,
+            target_index=0,
         )
