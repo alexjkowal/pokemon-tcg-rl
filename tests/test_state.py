@@ -1,7 +1,12 @@
 import pytest
 
+from pokemon_tcg_rl.engine.actions import (
+    ChoiceType,
+    PokemonTargetScope,
+)
 from pokemon_tcg_rl.engine.state import (
     Attack,
+    AttackChoice,
     Card,
     CardType,
     EnergyType,
@@ -207,4 +212,66 @@ def test_basic_pokemon_rejects_evolves_from() -> None:
             pokemon_stage=PokemonStage.BASIC,
             evolves_from="Something",
             hp=60,
+        )
+
+def test_attack_can_store_pokemon_target_choice() -> None:
+    choice = AttackChoice(
+        choice_type=ChoiceType.POKEMON_TARGET,
+        target_scope=PokemonTargetScope.OPPONENT_BENCH,
+    )
+
+    attack = Attack(
+        name="Bench Strike",
+        choices=(choice,),
+    )
+
+    assert len(attack.choices) == 1
+    assert (
+        attack.choices[0].choice_type
+        == ChoiceType.POKEMON_TARGET
+    )
+    assert (
+        attack.choices[0].target_scope
+        == PokemonTargetScope.OPPONENT_BENCH
+    )
+
+def test_damage_allocation_choice_stores_amount() -> None:
+    choice = AttackChoice(
+        choice_type=ChoiceType.DAMAGE_ALLOCATION,
+        target_scope=PokemonTargetScope.OPPONENT_ANY,
+        amount=6,
+    )
+
+    assert choice.amount == 6
+
+def test_damage_allocation_requires_amount() -> None:
+    with pytest.raises(
+        ValueError,
+        match="require an amount",
+    ):
+        AttackChoice(
+            choice_type=ChoiceType.DAMAGE_ALLOCATION,
+            target_scope=PokemonTargetScope.OPPONENT_ANY,
+        )
+
+def test_damage_allocation_rejects_nonpositive_amount() -> None:
+    with pytest.raises(
+        ValueError,
+        match="must be positive",
+    ):
+        AttackChoice(
+            choice_type=ChoiceType.DAMAGE_ALLOCATION,
+            target_scope=PokemonTargetScope.OPPONENT_ANY,
+            amount=0,
+        )
+
+def test_pokemon_target_choice_rejects_amount() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Only damage allocation",
+    ):
+        AttackChoice(
+            choice_type=ChoiceType.POKEMON_TARGET,
+            target_scope=PokemonTargetScope.OPPONENT_BENCH,
+            amount=1,
         )

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from pokemon_tcg_rl.engine.actions import (
+    ChoiceType,
+    PokemonTargetScope,
+)
+
 
 class CardType(StrEnum):
     """Broad categories of Pokemon TCG cards."""
@@ -54,6 +59,44 @@ class EnergyType(StrEnum):
     FAIRY = "fairy"
 
 @dataclass(frozen=True, slots=True)
+class AttackChoice:
+    """One additional decision required while resolving an attack."""
+
+    choice_type: ChoiceType
+    target_scope: PokemonTargetScope
+
+    damage: int | None = None
+    amount: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.damage is not None and self.damage < 0:
+            raise ValueError(
+                "Attack choice damage cannot be negative."
+            )
+
+        if self.choice_type == ChoiceType.DAMAGE_ALLOCATION:
+            if self.amount is None:
+                raise ValueError(
+                    "Damage allocation choices require an amount."
+                )
+
+            if self.amount <= 0:
+                raise ValueError(
+                    "Damage allocation amount must be positive."
+                )
+
+            if self.damage is not None:
+                raise ValueError(
+                    "Damage allocation choices cannot specify "
+                    "direct damage."
+                )
+
+        elif self.amount is not None:
+            raise ValueError(
+                "Only damage allocation choices may specify an amount."
+            )
+
+@dataclass(frozen=True, slots=True)
 class Attack:
     """Printed information for one Pokemon attack."""
 
@@ -61,6 +104,8 @@ class Attack:
     energy_cost: tuple[EnergyType, ...] = ()
     base_damage: int = 0
     text: str = ""
+
+    choices: tuple[AttackChoice, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name:

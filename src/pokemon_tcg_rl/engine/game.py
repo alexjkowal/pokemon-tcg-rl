@@ -3,12 +3,17 @@ from random import Random
 
 from pokemon_tcg_rl.engine.actions import (
     ActionType,
+    ChoiceType,
     GameAction,
+    PendingChoice,
+    PokemonTargetScope,
     PokemonZone,
 )
 from pokemon_tcg_rl.engine.state import (
+    Attack,
     Card,
     CardType,
+    EnergyType,
     PlayerState,
     PokemonInPlay,
 )
@@ -31,6 +36,7 @@ class Game:
         default_factory=lambda: [0, 0]
     )
 
+    pending_choice: PendingChoice | None = None
     started: bool = False
     setup_prepared: bool = False
     prizes_placed: bool = False
@@ -103,6 +109,22 @@ class Game:
                         if card.is_basic_pokemon
                     )
 
+                if player.active is not None:
+                    for attack_index, attack in enumerate(
+                        player.active.current_card.attacks
+                    ):
+                        if self._can_attack(
+                            player_index,
+                            attack,
+                        ):
+                            actions.append(
+                                GameAction(
+                                    action_type=ActionType.ATTACK,
+                                    player_index=player_index,
+                                    attack_index=attack_index,
+                                )
+                            )
+
                 return actions
 
             if (
@@ -121,6 +143,12 @@ class Game:
                 ]
 
             return []
+
+        if self.pending_choice is not None:
+            if player_index != self.pending_choice.player_index:
+                return []
+
+            return self._get_pending_choice_actions()
 
         # Normal gameplay
         if player_index != self.current_player:
@@ -325,7 +353,97 @@ class Game:
             self.end_turn()
             return
 
+        if action.action_type == ActionType.ATTACK:
+            if action.attack_index is None:
+                raise RuntimeError(
+                    "Attack action is missing an attack index."
+                )
+
+            self.attack(
+                player_index=action.player_index,
+                attack_index=action.attack_index,
+            )
+            return
+
+        if action.action_type == ActionType.CHOOSE_POKEMON_TARGET:
+            self.choose_pokemon_target(action)
+            return
+
+        if action.action_type == ActionType.ALLOCATE_DAMAGE:
+            self.allocate_damage(action)
+            return
+
         raise ValueError(f"Unsupported action type: {action.action_type}")
+
+    def allocate_damage(
+    self,
+    action: GameAction,
+    ) -> None:
+        """Allocate some remaining damage counters to one Pokemon."""
+
+        choice = self.pending_choice
+
+        if (
+            choice is None
+            or choice.choice_type
+            != ChoiceType.DAMAGE_ALLOCATION
+        ):
+            raise RuntimeError(
+                "No damage allocation is currently pending."
+            )
+
+        if action not in self._get_pending_choice_actions():
+            raise ValueError(
+                "That damage allocation is not legal."
+            )
+
+        if (
+            action.target_player_index is None
+            or action.target_zone is None
+            or action.amount is None
+        ):
+            raise RuntimeError(
+                "Damage allocation action is incomplete."
+            )
+
+        if choice.remaining_amount is None:
+            raise RuntimeError(
+                "Damage allocation has no remaining amount."
+            )
+
+        target = self._get_targeted_pokemon(
+            action.target_player_index,
+            action.target_zone,
+            action.target_index,
+        )
+
+        # One Pokemon TCG damage counter represents 10 damage.
+        target.damage += action.amount * 10
+
+        choice.remaining_amount -= action.amount
+
+        if choice.remaining_amount > 0:
+            return
+
+        if (
+            choice.source_attack_index is None
+            or choice.source_choice_index is None
+        ):
+            raise RuntimeError(
+                "Pending attack choice is missing source information."
+            )
+
+        player_index = choice.player_index
+        attack_index = choice.source_attack_index
+        next_choice_index = choice.source_choice_index + 1
+
+        self.pending_choice = None
+
+        self._continue_attack_resolution(
+            player_index,
+            attack_index,
+            next_choice_index,
+        )
 
     def prepare_setup(self) -> None:
         """Create valid opening hands, resolving mulligans as needed.
@@ -415,6 +533,77 @@ class Game:
             PokemonInPlay(
                 evolution_stack=[card]
             )
+        )
+
+    def choose_pokemon_target(
+    self,
+    action: GameAction,
+    ) -> None:
+        """Resolve a pending Pokemon-target decision."""
+
+        choice = self.pending_choice
+
+        if (
+            choice is None
+            or choice.choice_type != ChoiceType.POKEMON_TARGET
+        ):
+            raise RuntimeError(
+                "No Pokemon target choice is currently pending."
+            )
+
+        if action not in self._get_pending_choice_actions():
+            raise ValueError(
+                "That Pokemon is not a legal target."
+            )
+
+        if (
+            action.target_player_index is None
+            or action.target_zone is None
+        ):
+            raise RuntimeError(
+                "Pokemon target action is incomplete."
+            )
+
+        if (
+            choice.source_attack_index is None
+            or choice.source_choice_index is None
+        ):
+            raise RuntimeError(
+                "Pending attack choice is missing source information."
+            )
+
+        attacker = self.players[choice.player_index]
+
+        if attacker.active is None:
+            raise RuntimeError(
+                "Attacking player has no Active Pokemon."
+            )
+
+        attack = attacker.active.current_card.attacks[
+            choice.source_attack_index
+        ]
+
+        attack_choice = attack.choices[
+            choice.source_choice_index
+        ]
+
+        target = self._get_targeted_pokemon(
+            action.target_player_index,
+            action.target_zone,
+            action.target_index,
+        )
+
+        if attack_choice.damage is not None:
+            target.damage += attack_choice.damage
+
+        next_choice_index = choice.source_choice_index + 1
+
+        self.pending_choice = None
+
+        self._continue_attack_resolution(
+            choice.player_index,
+            choice.source_attack_index,
+            next_choice_index,
         )
 
     def finish_initial_pokemon_placement(self, player_index: int) -> None:
@@ -593,6 +782,54 @@ class Game:
         player.hand.remove(card)
         target.evolution_stack.append(card)
         target.last_evolved_turn = self.turn_number
+
+
+    def attack(
+    self,
+    player_index: int,
+    attack_index: int,
+    ) -> None:
+        """Begin resolving one attack from the Active Pokemon."""
+
+        self._require_current_turn(player_index)
+
+        player = self.players[player_index]
+
+        if player.active is None:
+            raise RuntimeError(
+                "A player must have an Active Pokemon to attack."
+            )
+
+        attacks = player.active.current_card.attacks
+
+        if attack_index < 0 or attack_index >= len(attacks):
+            raise ValueError(
+                "Attack index is out of range."
+            )
+
+        selected_attack = attacks[attack_index]
+
+        if not self._can_attack(
+            player_index,
+            selected_attack,
+        ):
+            raise RuntimeError(
+                "This attack cannot currently be used."
+            )
+
+        opponent = self.players[1 - player_index]
+
+        if (
+            selected_attack.base_damage > 0
+            and opponent.active is not None
+        ):
+            opponent.active.damage += selected_attack.base_damage
+
+        self._continue_attack_resolution(
+            player_index,
+            attack_index,
+            0,
+        )
 
 
     def attach_energy(
@@ -831,3 +1068,269 @@ class Game:
             evolution_card.evolves_from
             == pokemon.current_card.name
         )
+
+    @staticmethod
+    def _can_pay_attack_cost(
+        pokemon: PokemonInPlay,
+        attack: Attack,
+    ) -> bool:
+        """Return whether attached Energy satisfies an attack cost."""
+
+        attached_energy = pokemon.attached_energy
+
+        if len(attached_energy) < len(attack.energy_cost):
+            return False
+
+        required_specific_types = [
+            energy_type
+            for energy_type in attack.energy_cost
+            if energy_type != EnergyType.COLORLESS
+        ]
+
+        for required_type in set(required_specific_types):
+            required_count = required_specific_types.count(
+                required_type
+            )
+
+            attached_count = sum(
+                1
+                for card in attached_energy
+                if card.energy_type == required_type
+            )
+
+            if attached_count < required_count:
+                return False
+
+        return True
+
+    def _can_attack(
+    self,
+    player_index: int,
+    attack: Attack,
+    ) -> bool:
+        """Return whether a player can currently use an attack."""
+
+        if player_index != self.current_player:
+            return False
+
+        if self.pending_choice is not None:
+            return False
+
+        # The starting player cannot attack on turn 1.
+        if self.turn_number == 1:
+            return False
+
+        player = self.players[player_index]
+
+        if player.active is None:
+            return False
+
+        return self._can_pay_attack_cost(
+            player.active,
+            attack,
+        )
+
+    def _get_pokemon_targets(
+    self,
+    player_index: int,
+    target_scope: PokemonTargetScope,
+    ) -> list[tuple[int, PokemonZone, int | None]]:
+        """Return every concrete Pokemon allowed by a target scope."""
+
+        opponent_index = 1 - player_index
+
+        if target_scope in {
+            PokemonTargetScope.OWN_ACTIVE,
+            PokemonTargetScope.OWN_BENCH,
+            PokemonTargetScope.OWN_ANY,
+        }:
+            target_player_index = player_index
+        else:
+            target_player_index = opponent_index
+
+        target_player = self.players[target_player_index]
+
+        targets: list[
+            tuple[int, PokemonZone, int | None]
+        ] = []
+
+        if (
+            target_scope
+            in {
+                PokemonTargetScope.OWN_ACTIVE,
+                PokemonTargetScope.OPPONENT_ACTIVE,
+                PokemonTargetScope.OWN_ANY,
+                PokemonTargetScope.OPPONENT_ANY,
+            }
+            and target_player.active is not None
+        ):
+            targets.append(
+                (
+                    target_player_index,
+                    PokemonZone.ACTIVE,
+                    None,
+                )
+            )
+
+        if target_scope in {
+            PokemonTargetScope.OWN_BENCH,
+            PokemonTargetScope.OPPONENT_BENCH,
+            PokemonTargetScope.OWN_ANY,
+            PokemonTargetScope.OPPONENT_ANY,
+        }:
+            targets.extend(
+                (
+                    target_player_index,
+                    PokemonZone.BENCH,
+                    bench_index,
+                )
+                for bench_index, _ in enumerate(
+                    target_player.bench
+                )
+            )
+
+        return targets
+
+    def _get_pending_choice_actions(
+    self,
+    ) -> list[GameAction]:
+        """Return the legal actions for the current pending choice."""
+
+        choice = self.pending_choice
+
+        if choice is None:
+            return []
+
+        targets = self._get_pokemon_targets(
+            choice.player_index,
+            choice.target_scope,
+        )
+
+        if choice.choice_type == ChoiceType.POKEMON_TARGET:
+            return [
+                GameAction(
+                    action_type=ActionType.CHOOSE_POKEMON_TARGET,
+                    player_index=choice.player_index,
+                    target_player_index=target_player_index,
+                    target_zone=target_zone,
+                    target_index=target_index,
+                )
+                for (
+                    target_player_index,
+                    target_zone,
+                    target_index,
+                ) in targets
+            ]
+
+        if choice.choice_type == ChoiceType.DAMAGE_ALLOCATION:
+            if (
+                choice.remaining_amount is None
+                or choice.remaining_amount <= 0
+            ):
+                raise RuntimeError(
+                    "Damage allocation requires a positive "
+                    "remaining amount."
+                )
+
+            return [
+                GameAction(
+                    action_type=ActionType.ALLOCATE_DAMAGE,
+                    player_index=choice.player_index,
+                    target_player_index=target_player_index,
+                    target_zone=target_zone,
+                    target_index=target_index,
+                    amount=amount,
+                )
+                for (
+                    target_player_index,
+                    target_zone,
+                    target_index,
+                ) in targets
+                for amount in range(
+                    1,
+                    choice.remaining_amount + 1,
+                )
+            ]
+
+        raise RuntimeError(
+            f"Unsupported pending choice type: "
+            f"{choice.choice_type}"
+        )
+
+    def _continue_attack_resolution(
+    self,
+    player_index: int,
+    attack_index: int,
+    choice_index: int,
+    ) -> None:
+        """Continue resolving an attack after its direct damage."""
+
+        player = self.players[player_index]
+
+        if player.active is None:
+            raise RuntimeError(
+                "Attacking player has no Active Pokemon."
+            )
+
+        attacks = player.active.current_card.attacks
+
+        if attack_index >= len(attacks):
+            raise RuntimeError(
+                "Attack index is out of range."
+            )
+
+        attack = attacks[attack_index]
+
+        if choice_index >= len(attack.choices):
+            self.pending_choice = None
+            self.end_turn()
+            return
+
+        attack_choice = attack.choices[choice_index]
+
+        remaining_amount = None
+
+        if (
+            attack_choice.choice_type
+            == ChoiceType.DAMAGE_ALLOCATION
+        ):
+            remaining_amount = attack_choice.amount
+
+        self.pending_choice = PendingChoice(
+            choice_type=attack_choice.choice_type,
+            player_index=player_index,
+            target_scope=attack_choice.target_scope,
+            source_attack_index=attack_index,
+            source_choice_index=choice_index,
+            remaining_amount=remaining_amount,
+        )
+
+    def _get_targeted_pokemon(
+    self,
+    target_player_index: int,
+    target_zone: PokemonZone,
+    target_index: int | None,
+    ) -> PokemonInPlay:
+        """Return one concrete Pokemon selected by an effect."""
+
+        player = self.players[target_player_index]
+
+        if target_zone == PokemonZone.ACTIVE:
+            if player.active is None:
+                raise RuntimeError(
+                    "Target player has no Active Pokemon."
+                )
+
+            return player.active
+
+        if target_index is None:
+            raise RuntimeError(
+                "Bench targets require an index."
+            )
+
+        if target_index >= len(player.bench):
+            raise RuntimeError(
+                "Bench target index is out of range."
+            )
+
+        return player.bench[target_index]

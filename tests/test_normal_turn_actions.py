@@ -2,11 +2,15 @@
 
 from pokemon_tcg_rl.engine.actions import (
     ActionType,
+    ChoiceType,
     GameAction,
+    PendingChoice,
+    PokemonTargetScope,
     PokemonZone,
 )
 from pokemon_tcg_rl.engine.game import Game
 from pokemon_tcg_rl.engine.state import (
+    Attack,
     Card,
     CardType,
     EnergyType,
@@ -25,6 +29,18 @@ def make_basic(card_id: str) -> Card:
         hp=60,
     )
 
+def make_attacking_basic(
+    card_id: str,
+    attack: Attack,
+) -> Card:
+    return Card(
+        card_id=card_id,
+        name=card_id,
+        card_type=CardType.POKEMON,
+        pokemon_stage=PokemonStage.BASIC,
+        hp=100,
+        attacks=(attack,),
+    )
 
 def make_energy(card_id: str) -> Card:
     return Card(
@@ -409,3 +425,161 @@ def test_evolution_preserves_damage_and_energy() -> None:
         active.attached_energy[0].card_id
         == "attached-energy"
     )
+
+def test_started_game_has_no_pending_choice() -> None:
+    game = make_started_game()
+
+    assert game.pending_choice is None
+
+def test_pending_opponent_bench_choice_returns_bench_targets() -> None:
+    game = make_started_game()
+
+    game.player_two.bench.extend(
+        [
+            PokemonInPlay(
+                evolution_stack=[
+                    make_basic("bench-one")
+                ]
+            ),
+            PokemonInPlay(
+                evolution_stack=[
+                    make_basic("bench-two")
+                ]
+            ),
+        ]
+    )
+
+    game.pending_choice = PendingChoice(
+        choice_type=ChoiceType.POKEMON_TARGET,
+        player_index=0,
+        target_scope=PokemonTargetScope.OPPONENT_BENCH,
+    )
+
+    actions = game.get_legal_actions(0)
+
+    assert actions == [
+        GameAction(
+            action_type=ActionType.CHOOSE_POKEMON_TARGET,
+            player_index=0,
+            target_player_index=1,
+            target_zone=PokemonZone.BENCH,
+            target_index=0,
+        ),
+        GameAction(
+            action_type=ActionType.CHOOSE_POKEMON_TARGET,
+            player_index=0,
+            target_player_index=1,
+            target_zone=PokemonZone.BENCH,
+            target_index=1,
+        ),
+    ]
+
+def test_pending_opponent_any_choice_includes_active_and_bench() -> None:
+    game = make_started_game()
+
+    game.player_two.bench.append(
+        PokemonInPlay(
+            evolution_stack=[
+                make_basic("bench-one")
+            ]
+        )
+    )
+
+    game.pending_choice = PendingChoice(
+        choice_type=ChoiceType.POKEMON_TARGET,
+        player_index=0,
+        target_scope=PokemonTargetScope.OPPONENT_ANY,
+    )
+
+    actions = game.get_legal_actions(0)
+
+    assert GameAction(
+        action_type=ActionType.CHOOSE_POKEMON_TARGET,
+        player_index=0,
+        target_player_index=1,
+        target_zone=PokemonZone.ACTIVE,
+    ) in actions
+
+    assert GameAction(
+        action_type=ActionType.CHOOSE_POKEMON_TARGET,
+        player_index=0,
+        target_player_index=1,
+        target_zone=PokemonZone.BENCH,
+        target_index=0,
+    ) in actions
+
+    assert len(actions) == 2
+
+def test_pending_choice_blocks_normal_turn_actions() -> None:
+    game = make_started_game()
+
+    game.pending_choice = PendingChoice(
+        choice_type=ChoiceType.POKEMON_TARGET,
+        player_index=0,
+        target_scope=PokemonTargetScope.OPPONENT_ACTIVE,
+    )
+
+    actions = game.get_legal_actions(0)
+
+    assert not any(
+        action.action_type == ActionType.END_TURN
+        for action in actions
+    )
+
+    assert not any(
+        action.action_type == ActionType.ATTACH_ENERGY
+        for action in actions
+    )
+
+    assert all(
+        action.action_type
+        == ActionType.CHOOSE_POKEMON_TARGET
+        for action in actions
+    )
+
+def test_only_choice_player_can_resolve_pending_choice() -> None:
+    game = make_started_game()
+
+    game.pending_choice = PendingChoice(
+        choice_type=ChoiceType.POKEMON_TARGET,
+        player_index=0,
+        target_scope=PokemonTargetScope.OPPONENT_ACTIVE,
+    )
+
+    assert game.get_legal_actions(1) == []
+
+def test_damage_allocation_generates_valid_amounts() -> None:
+    game = make_started_game()
+
+    game.pending_choice = PendingChoice(
+        choice_type=ChoiceType.DAMAGE_ALLOCATION,
+        player_index=0,
+        target_scope=PokemonTargetScope.OPPONENT_ACTIVE,
+        remaining_amount=3,
+    )
+
+    actions = game.get_legal_actions(0)
+
+    assert actions == [
+        GameAction(
+            action_type=ActionType.ALLOCATE_DAMAGE,
+            player_index=0,
+            target_player_index=1,
+            target_zone=PokemonZone.ACTIVE,
+            amount=1,
+        ),
+        GameAction(
+            action_type=ActionType.ALLOCATE_DAMAGE,
+            player_index=0,
+            target_player_index=1,
+            target_zone=PokemonZone.ACTIVE,
+            amount=2,
+        ),
+        GameAction(
+            action_type=ActionType.ALLOCATE_DAMAGE,
+            player_index=0,
+            target_player_index=1,
+            target_zone=PokemonZone.ACTIVE,
+            amount=3,
+        ),
+    ]
